@@ -1,3 +1,4 @@
+import os
 import requests
 from bs4 import BeautifulSoup
 import sqlite3
@@ -93,19 +94,16 @@ def scrape_flashback():
     soup = BeautifulSoup(r.text, "html.parser")
     koder = []
 
-    # Flashback forum kan ha lite olika struktur, här en enkel scraping av trådar
     for tråd in soup.select(".topic-list__item")[:5]:
         titel_el = tråd.select_one(".topic-list__title")
         titel = titel_el.get_text(strip=True) if titel_el else ""
         länk_el = tråd.select_one("a")
         länk = "https://www.flashback.org" + länk_el["href"] if länk_el and länk_el.has_attr("href") else url
 
-        # Enklaste metod: leta efter kod i titeln (kan förbättras med NLP)
         kod = ""
         if "kod" in titel.lower():
             delar = titel.split()
             for del_str in delar:
-                # Enkel regex-liknande test på kod: minst 4 tecken, bokstäver eller siffror
                 if len(del_str) >= 4 and del_str.isalnum():
                     kod = del_str
                     break
@@ -156,7 +154,7 @@ def run_scrape_save():
     save_koder(alla_koder)
     print(f"Totalt sparade koder: {len(alla_koder)}")
 
-# ---------- API med filter på butik ----------
+# ---------- API ----------
 @app.route("/api/koder")
 def api_koder():
     butik_filter = request.args.get("butik")
@@ -178,15 +176,13 @@ def api_koder():
         } for r in rows]
     return jsonify({"koder": koder})
 
-# ---------- Schemalägg scraping var 6:e timme ----------
-from apscheduler.schedulers.background import BackgroundScheduler
-
-scheduler = BackgroundScheduler()
-scheduler.add_job(run_scrape_save, 'interval', hours=6)
-scheduler.start()
-
-# Kör en gång vid start
-run_scrape_save()
-
+# ---------- Huvudkörning ----------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(run_scrape_save, 'interval', hours=6)
+    scheduler.start()
+
+    run_scrape_save()
+
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
