@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import sqlite3
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -23,7 +23,7 @@ def init_db():
         """)
 init_db()
 
-# Scraper för Rabble.se (exempel)
+# ---------- Scraper Rabble.se ----------
 def scrape_rabble():
     url = "https://rabble.se/rabattkoder"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -31,12 +31,18 @@ def scrape_rabble():
     soup = BeautifulSoup(r.text, "html.parser")
     koder = []
 
-    # Anpassa efter Rabble:s HTML-struktur, här ett exempel:
-    for card in soup.select(".coupon-card"):  # ändra selector vid behov
-        butik = card.select_one(".coupon-card__brand").get_text(strip=True) if card.select_one(".coupon-card__brand") else "Okänd"
-        kod = card.select_one(".coupon-code") and card.select_one(".coupon-code").get_text(strip=True) or ""
-        beskrivning = card.select_one(".coupon-card__title") and card.select_one(".coupon-card__title").get_text(strip=True) or ""
-        länk = card.select_one("a")["href"] if card.select_one("a") else url
+    for card in soup.select(".coupon-card"):
+        butik = card.select_one(".coupon-card__brand")
+        butik = butik.get_text(strip=True) if butik else "Okänd"
+
+        kod_el = card.select_one(".coupon-code")
+        kod = kod_el.get_text(strip=True) if kod_el else ""
+
+        beskrivning_el = card.select_one(".coupon-card__title")
+        beskrivning = beskrivning_el.get_text(strip=True) if beskrivning_el else ""
+
+        länk_el = card.select_one("a")
+        länk = länk_el["href"] if länk_el and länk_el.has_attr("href") else url
 
         if kod:
             koder.append({
@@ -48,7 +54,73 @@ def scrape_rabble():
 
     return koder
 
-# Spara koder i DB (uppdaterar gamla om kod finns)
+# ---------- Scraper Kampanjjakt.se ----------
+def scrape_kampanjjakt():
+    url = "https://kampanjjakt.se/rabattkoder"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, "html.parser")
+    koder = []
+
+    for card in soup.select(".coupon"):
+        butik_el = card.select_one(".store-name")
+        butik = butik_el.get_text(strip=True) if butik_el else "Okänd"
+
+        kod_el = card.select_one(".code")
+        kod = kod_el.get_text(strip=True) if kod_el else ""
+
+        beskrivning_el = card.select_one(".description")
+        beskrivning = beskrivning_el.get_text(strip=True) if beskrivning_el else ""
+
+        länk_el = card.select_one("a")
+        länk = länk_el["href"] if länk_el and länk_el.has_attr("href") else url
+
+        if kod:
+            koder.append({
+                "butik": butik,
+                "kod": kod,
+                "beskrivning": beskrivning,
+                "url": länk
+            })
+
+    return koder
+
+# ---------- Scraper Flashback Forum ----------
+def scrape_flashback():
+    url = "https://www.flashback.org/forum/81-rabattkoder"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, "html.parser")
+    koder = []
+
+    # Flashback forum kan ha lite olika struktur, här en enkel scraping av trådar
+    for tråd in soup.select(".topic-list__item")[:5]:
+        titel_el = tråd.select_one(".topic-list__title")
+        titel = titel_el.get_text(strip=True) if titel_el else ""
+        länk_el = tråd.select_one("a")
+        länk = "https://www.flashback.org" + länk_el["href"] if länk_el and länk_el.has_attr("href") else url
+
+        # Enklaste metod: leta efter kod i titeln (kan förbättras med NLP)
+        kod = ""
+        if "kod" in titel.lower():
+            delar = titel.split()
+            for del_str in delar:
+                # Enkel regex-liknande test på kod: minst 4 tecken, bokstäver eller siffror
+                if len(del_str) >= 4 and del_str.isalnum():
+                    kod = del_str
+                    break
+
+        if kod:
+            koder.append({
+                "butik": "Flashback",
+                "kod": kod,
+                "beskrivning": titel,
+                "url": länk
+            })
+
+    return koder
+
+# ---------- Spara koder i DB ----------
 def save_koder(koder):
     with sqlite3.connect(DB) as conn:
         c = conn.cursor()
@@ -69,20 +141,34 @@ def save_koder(koder):
                 """, (k["butik"], k["kod"], k["beskrivning"], k["url"], datetime.utcnow().isoformat()))
         conn.commit()
 
-# Kör scraper och spara resultat
+# ---------- Kör scraper och spara resultat ----------
 def run_scrape_save():
-    print("Startar scraping av rabattkoder...")
-    koder = scrape_rabble()
-    print(f"Hämtade {len(koder)} koder från Rabble.se")
-    save_koder(koder)
-    print("Sparade koder i databasen.")
+    print("Startar scraping...")
+    alla_koder = []
+    for scraper in [scrape_rabble, scrape_kampanjjakt, scrape_flashback]:
+        try:
+            koder = scraper()
+            print(f"Hämtade {len(koder)} från {scraper.__name__}")
+            alla_koder.extend(koder)
+        except Exception as e:
+            print(f"Fel i {scraper.__name__}: {e}")
 
-# API-endpoint som returnerar alla koder
+    save_koder(alla_koder)
+    print(f"Totalt sparade koder: {len(alla_koder)}")
+
+# ---------- API med filter på butik ----------
 @app.route("/api/koder")
 def api_koder():
+    butik_filter = request.args.get("butik")
     with sqlite3.connect(DB) as conn:
         c = conn.cursor()
-        c.execute("SELECT butik, kod, beskrivning, url FROM rabattkoder ORDER BY hämtad_datum DESC")
+        query = "SELECT butik, kod, beskrivning, url FROM rabattkoder"
+        params = []
+        if butik_filter:
+            query += " WHERE butik LIKE ?"
+            params.append(f"%{butik_filter}%")
+        query += " ORDER BY hämtad_datum DESC"
+        c.execute(query, params)
         rows = c.fetchall()
         koder = [{
             "butik": r[0],
@@ -92,12 +178,14 @@ def api_koder():
         } for r in rows]
     return jsonify({"koder": koder})
 
-# Schemalägg scraping var 6:e timme
+# ---------- Schemalägg scraping var 6:e timme ----------
+from apscheduler.schedulers.background import BackgroundScheduler
+
 scheduler = BackgroundScheduler()
 scheduler.add_job(run_scrape_save, 'interval', hours=6)
 scheduler.start()
 
-# Kör en gång direkt vid start
+# Kör en gång vid start
 run_scrape_save()
 
 if __name__ == "__main__":
