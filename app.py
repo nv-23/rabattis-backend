@@ -1,20 +1,38 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+from models import db, Rabattkod, init_db
+from scraper import scrape_kampanjjakt
 
 app = Flask(__name__)
 CORS(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///koder.db'
+db.init_app(app)
+
+@app.before_first_request
+def setup():
+    init_db()
+    scrape_kampanjjakt()
 
 @app.route("/api/koder")
 def get_koder():
-    rabattkoder = [
-        {"butik": "H&M", "kod": "SOMMAR15", "beskrivning": "15% på allt", "url": "https://www.hm.com"},
-        {"butik": "Zalando", "kod": "VÅR2025", "beskrivning": "20% på vårkollektionen", "url": "https://www.zalando.se"},
-        {"butik": "Lyko", "kod": "BEAUTY20", "beskrivning": "20% på hudvård", "url": "https://www.lyko.com"},
-        {"butik": "CDON", "kod": "TECH10", "beskrivning": "10% på elektronik", "url": "https://www.cdon.se"},
-        {"butik": "Apotek Hjärtat", "kod": "VITAMIN10", "beskrivning": "10% på vitaminer", "url": "https://www.apotekhjartat.se"},
-        {"butik": "Dahl Skincare", "kod": "DAHL2025", "beskrivning": "20% ny kund", "url": "https://dahlskincare.se"}
-    ]
-    return jsonify({"koder": rabattkoder})
+    query = Rabattkod.query
+    butik = request.args.get("butik")
+    kategori = request.args.get("kategori")
+
+    if butik:
+        query = query.filter(Rabattkod.butik.ilike(f"%{butik}%"))
+    if kategori:
+        query = query.filter(Rabattkod.kategori.ilike(f"%{kategori}%"))
+
+    resultat = [{
+        "butik": k.butik,
+        "kod": k.kod,
+        "beskrivning": k.beskrivning,
+        "url": k.url,
+        "kategori": k.kategori,
+        "utgår": k.utgår
+    } for k in query.all()]
+    return jsonify({"koder": resultat})
 
 if __name__ == "__main__":
     app.run(debug=True)
