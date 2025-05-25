@@ -176,13 +176,13 @@ def api_koder():
         } for r in rows]
     return jsonify({"koder": koder})
 
+# ---------- Starta scraping direkt + schemalägg ----------
+scheduler = BackgroundScheduler()
+scheduler.add_job(run_scrape_save, 'interval', hours=6)
+scheduler.start()
+run_scrape_save()
+
 # ---------- Huvudkörning ----------
 if __name__ == "__main__":
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(run_scrape_save, 'interval', hours=6)
-    scheduler.start()
-
-    run_scrape_save()
-
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
