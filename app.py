@@ -5,8 +5,10 @@ import sqlite3
 from flask import Flask, jsonify, request
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 DB = "rabattkoder.db"
 
 # Initiera DB och tabell
