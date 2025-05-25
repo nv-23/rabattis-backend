@@ -26,6 +26,11 @@ def init_db():
         """)
 init_db()
 
+@app.route("/scrape", methods=["POST"])
+def manual_scrape():
+    run_scrape_save()
+    return jsonify({"status": "Scraping kördes manuellt"}), 200
+
 # ---------- Scraper Rabble.se ----------
 def scrape_rabble():
     url = "https://rabble.se/rabattkoder"
