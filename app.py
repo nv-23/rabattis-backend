@@ -5,13 +5,9 @@ from scraper import scrape_kampanjjakt
 
 app = Flask(__name__)
 CORS(app)
+
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///koder.db'
 db.init_app(app)
-
-@app.before_first_request
-def setup():
-    init_db()
-    scrape_kampanjjakt()
 
 @app.route("/api/koder")
 def get_koder():
@@ -35,4 +31,7 @@ def get_koder():
     return jsonify({"koder": resultat})
 
 if __name__ == "__main__":
+    with app.app_context():
+        init_db()
+        scrape_kampanjjakt()
     app.run(debug=True)
