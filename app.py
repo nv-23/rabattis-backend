@@ -31,7 +31,10 @@ def get_koder():
     return jsonify({"koder": resultat})
 
 if __name__ == "__main__":
+    import os
     with app.app_context():
         init_db()
         scrape_kampanjjakt()
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
